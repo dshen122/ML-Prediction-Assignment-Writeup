@@ -1,0 +1,114 @@
+---
+title: "ML Prediction Assignment Writeup"
+author: "D. Shen"
+date: "September 25, 2015"
+output: 
+  html_document:
+    pandoc_args: [
+     "+RTS", "-K64m",
+     "-RTS"
+    ]
+---
+
+
+### Setup the environement
+
+```{r}
+library(caret)
+library(rpart)
+library(randomForest)
+
+# to ensure reproducibility
+set.seed(1331)
+```
+###load the datasets
+```{r}
+Url4Training <-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+Url4Testing <-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+#Inspection of training files, one would notice that two character strings are used to denote not available data,  NA, or #DIV/0!
+
+TrainingDS <- read.csv(url(Url4Training), head= TRUE, na.strings=c("NA","#DIV/0!",""))
+FinalTestDS <- read.csv(url(Url4Testing), head=TRUE, na.strings=c("NA","#DIV/0!",""))
+
+```
+###Training Dataset Partition
+Per project requriement of cross validation, we are going to further partition training dataset into training and testing datasets with 60 to 40 distribution.
+```{r}
+inTrain <- createDataPartition(TrainingDS$classe, p=0.60, list=FALSE)
+Training <- TrainingDS[inTrain,]
+Testing <- TrainingDS[-inTrain,]
+#check the dimension to make sure we get 60 to 40 split between training and testing
+dim(Training); dim(Testing)
+```
+
+###Dataset Clean Up
+```{r}
+#first remove all NZV variables
+nzv <- nearZeroVar(Training, saveMetrics = TRUE)
+NZVNames <- rownames(nzv[nzv[,"nzv"]>0,])
+
+
+#remove those predictors with NZV
+nopredictlist <- names(Training) %in% NZVNames
+Training <- Training[!nopredictlist]
+
+#perform the same operation towards Testing and final test dataset
+Testing <- Testing[!nopredictlist]
+FinalTestDS <- FinalTestDS[!nopredictlist]
+
+#remove the id column from the datasets
+Training <- Training[c(-1)]
+Testing <- Testing[c(-1)]
+FinalTestDS <- FinalTestDS[c(-1)]
+
+
+#remove those predictors with too many NA (>50%)
+tempDS <- Training
+for(i in 1:length(Training)) { 
+        if( sum( is.na(Training[, i] ) ) /nrow(Training) >= .5 ){ 
+        for(j in 1:length(tempDS)) {
+            if( length( grep(names(Training[i]), names(tempDS)[j]) ) ==1){  
+                tempDS <- tempDS[ , -j] 
+            }   
+        } 
+    }
+}
+
+Training <- tempDS;  rm(tempDS)
+
+#Remove the same column from test and final test dataset
+Testing <- Testing[colnames(Training)]
+FinalTestDS <- FinalTestDS[colnames(Training[,-58])]  #column 58 is the outcome column
+
+```
+## Machining Learning Analysis
+
+###Predicting with Tree
+We start with the classification Tree method 
+```{r}
+modFitRP <- train(classe ~ ., method="rpart", data=Training)
+#cross validate the model
+confusionMatrix(Testing$classe, predict(modFitRP, Testing))
+
+```
+
+###Predicting with random Forest
+From the cross validate of the tree classification (see results in the appendix), we can see the accuracy of the prediction is very low (48%), it is so low and most likely that additional pruning would improve the results to reach satisfactory accuracy.  Next we will use the random forest mothod.
+
+```{r}
+modFitRF <- train(classe ~ ., data =Training, method="rf", trControl=trainControl(method="cv", 5), prox=TRUE)
+#cross valide the model
+confusionMatrix(Testing$classe, predict(modFitRF, Testing))
+```
+
+## Machining Learning Analysis Results
+From above two models, we conclusion random forest model has much high accuracy for our data (99.85%), thus will be the model to run against our final test data set
+
+###Results with the final test set
+The random forest prediction model is applied to the final test data set and results are following:
+```{r}
+prediction <- predict(modFitRF, FinalTestDS)
+prediction
+
+```
